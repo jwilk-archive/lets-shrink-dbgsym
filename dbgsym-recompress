@@ -5,13 +5,18 @@
 
 set -e -u
 UID=$(id -u)
+if [ $# != 2 ]
+then
+    printf 'Usage: %s IN-DEB OUT-DEB\n'  "${0#**/}" >&2
+    exit 1
+fi
 if [ "$UID" -ne 0 ]
 then
     printf '%s: error: must be run as (fake)root\n' "${0#**/}" >&2
     exit 1
 fi
 in="$1"
-out="${in%.deb}.rdeb"
+out="$2"
 tmpdir=$(mktemp -d -t lets-shrink-dbgsym.XXXXXX)
 dpkg-deb -R "$in" "$tmpdir"
 dbgdir="$tmpdir/usr/lib/debug"
