@@ -1,0 +1,25 @@
+#!/bin/sh
+
+# Copyright © 2020 Jakub Wilk <jwilk@jwilk.net>
+# SPDX-License-Identifier: MIT
+
+set -e -u
+UID=$(id -u)
+if [ "$UID" -ne 0 ]
+then
+    printf '%s: error: must be run as (fake)root\n' "${0#**/}" >&2
+    exit 1
+fi
+in="$1"
+out="${in%.deb}.rdeb"
+tmpdir=$(mktemp -d -t lets-shrink-dbgsym.XXXXXX)
+dpkg-deb -R "$in" "$tmpdir"
+dbgdir="$tmpdir/usr/lib/debug"
+if [ -d "$dbgdir" ]
+then
+    find "$dbgdir" -type f -exec objcopy --decompress-debug-sections '{}' ';'
+fi
+dpkg-deb --build "$tmpdir" "$out"
+rm -rf "$tmpdir"
+
+# vim:ts=4 sts=4 sw=4 et
