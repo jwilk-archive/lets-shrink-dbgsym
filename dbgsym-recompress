@@ -7,7 +7,7 @@ set -e -u
 UID=$(id -u)
 if [ $# != 2 ]
 then
-    printf 'Usage: %s IN-DEB OUT-DEB\n'  "${0#**/}" >&2
+    printf 'Usage: %s IN-DEB OUT-DEB\n' "${0#**/}" >&2
     exit 1
 fi
 if [ "$UID" -ne 0 ]
