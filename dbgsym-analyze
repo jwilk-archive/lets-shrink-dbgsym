@@ -63,6 +63,39 @@ def recompress_inplace(path):
     size_after = os.path.getsize(path)
     return (size_before, size_after)
 
+class DummyCache(object):
+
+    def __getitem__(self, name):
+        raise KeyError(name)
+
+    def __setitem__(self, name, value):
+        pass
+
+    def close(self):
+        pass
+
+class SQLiteCache(object):
+
+    def __init__(self, path):
+        self.conn = sqlite3.connect(path)
+        with self.conn as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS "results" ("name" PRIMARY KEY, "size.before", "size.after")')
+
+    def __getitem__(self, name):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT "size.before", "size.after" FROM "results" WHERE "name" = ?', [name])
+        row = cursor.fetchone()
+        if row is None:
+            raise KeyError(name)
+        return row
+
+    def __setitem__(self, name, value):
+        with self.conn as conn:
+            conn.execute('INSERT INTO "results" VALUES (?, ?, ?)', [name, *value])
+
+    def close(self):
+        self.conn.close()
+
 default = types.SimpleNamespace(
     mirror='http://debug.mirrors.debian.org/debian-debug',
     dist='stable',
@@ -104,29 +137,25 @@ def main():
                 path = para['Filename']
                 base = posixpath.basename(path)
                 queue[base] = path
-    if options.cache is not None:
-        conn = sqlite3.connect(options.cache)
-        cursor = conn.cursor()
-        cursor.execute('CREATE TABLE IF NOT EXISTS "results" ("name" PRIMARY KEY, "size.before", "size.after")')
+    if options.cache is None:
+        cache = DummyCache()
     else:
-        conn = cursor = None
+        cache = SQLiteCache(options.cache)
     for base, path in queue.items():
-        if cursor is not None:
-            cursor.execute('SELECT "size.before", "size.after" FROM "results" WHERE "name" = ?', [base])
-            row = cursor.fetchone()
-            if row is not None:
-                print(f'{base}\t{row[0]}\t{row[1]}')
-                continue
+        try:
+            [size_before, size_after] = cache[base]
+        except KeyError:
+            pass
+        else:
+            print(f'{base}\t{size_before}\t{size_after}')
+            continue
         with Fetcher(urlbase=f'{mirror}/') as fetcher:
             fetcher.add(path, base)
             [path] = fetcher.run()
             (size_before, size_after) = recompress_inplace(path)
             print(f'{base}\t{size_before}\t{size_after}')
-        if cursor is not None:
-            cursor.execute('INSERT INTO "results" VALUES (?, ?, ?)', [base, size_before, size_after])
-            conn.commit()
-    if conn is not None:
-        conn.close()
+        cache[base] = (size_before, size_after)
+    cache.close()
 
 if __name__ == '__main__':
     main()
