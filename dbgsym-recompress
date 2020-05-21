@@ -19,6 +19,7 @@ in="$1"
 out="$2"
 tmpdir=$(mktemp -d -t lets-shrink-dbgsym.XXXXXX)
 dpkg-deb -R "$in" "$tmpdir"
+true > "$out"
 dbgdir="$tmpdir/usr/lib/debug"
 if [ -d "$dbgdir" ]
 then
