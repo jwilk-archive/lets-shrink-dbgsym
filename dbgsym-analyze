@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+# encoding=UTF-8
+
+# Copyright © 2012-2020 Jakub Wilk <jwilk@jwilk.net>
+# SPDX-License-Identifier: MIT
+
+import argparse
+import os
+import posixpath
+import subprocess
+import sys
+import tempfile
+import types
+import urllib.parse
+
+import apt
+import apt_pkg
+
+class Fetcher():
+
+    def __init__(self, urlbase):
+        self._urlbase = urlbase
+        self._progress = apt.progress.text.AcquireProgress(sys.stderr)
+        self._acquire = apt_pkg.Acquire(self._progress)
+        self._files = []
+        self._tmpdir = tempfile.TemporaryDirectory(prefix='lets-shrink-dbgsym.')
+
+    def add(self, url, name):
+        url = urllib.parse.urljoin(self._urlbase, url)
+        self._files += [apt_pkg.AcquireFile(
+            self._acquire,
+            uri=url,
+            descr=url,
+            destfile=os.path.join(self._tmpdir.name, name)
+        )]
+
+    def run(self):
+        acq = self._acquire
+        rc = acq.run()
+        if rc != acq.RESULT_CONTINUE:
+            raise RuntimeError('fetching failed')
+        for acqfile in self._files:
+            if acqfile.status != acqfile.STAT_DONE:
+                raise RuntimeError('fetching failed')
+            yield acqfile.destfile
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc, value, tb):
+        self.close()
+
+    def close(self):
+        self._tmpdir.cleanup()
+
+here = os.path.dirname(__file__)
+recompress_cmd = os.path.join(here, 'dbgsym-recompress')
+
+def recompress_inplace(path):
+    size_before = os.path.getsize(path)
+    subprocess.check_call(['fakeroot', recompress_cmd, path, path])
+    size_after = os.path.getsize(path)
+    return (size_before, size_after)
+
+default = types.SimpleNamespace(
+    mirror='http://debug.mirrors.debian.org/debian-debug',
+    dist='stable',
+    areas='main',
+    archs='amd64',
+)
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--mirror', metavar='URL', default=default.mirror,
+        help=f'Debian mirror to use (default: {default.mirror})'
+    )
+    ap.add_argument('--distribution', metavar='DIST', default=default.dist,
+        help=f'Debian distribution to use (default: {default.dist})'
+    )
+    ap.add_argument('--areas', metavar='AREA[,AREA...]', default=default.areas,
+        help=f'archive areas to use (default: {default.areas})'
+    )
+    ap.add_argument('--architectures', metavar='ARCH[,ARCH...]', default=default.archs,
+        help=f'architectures to use (default: {default.archs})'
+    )
+    options = ap.parse_args()
+    mirror = options.mirror
+    dist = options.distribution
+    areas = options.areas.split(',')
+    archs = options.architectures.split(',')
+    urlbase = f'{mirror}/dists/{dist}-debug/'
+    queue = {}
+    with Fetcher(urlbase=urlbase) as fetcher:
+        for area in areas:
+            for arch in archs:
+                path = f'{area}/binary-{arch}/Packages.xz'
+                fetcher.add(path, path.replace('/', '_'))
+        for pkgs_path in fetcher.run():
+            for para in apt_pkg.TagFile(pkgs_path):
+                path = para['Filename']
+                base = posixpath.basename(path)
+                queue[base] = path
+    for base, path in queue.items():
+        with Fetcher(urlbase=f'{mirror}/') as fetcher:
+            fetcher.add(path, base)
+            [path] = fetcher.run()
+            (size_before, size_after) = recompress_inplace(path)
+            print(f'{base}\t{size_before}\t{size_after}')
+
+if __name__ == '__main__':
+    main()
+
+# vim:ts=4 sts=4 sw=4 et
