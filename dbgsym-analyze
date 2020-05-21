@@ -7,6 +7,7 @@
 import argparse
 import os
 import posixpath
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -83,6 +84,9 @@ def main():
     ap.add_argument('--architectures', metavar='ARCH[,ARCH...]', default=default.archs,
         help=f'architectures to use (default: {default.archs})'
     )
+    ap.add_argument('--cache', metavar='FILE',
+        help='cache results in this file'
+    )
     options = ap.parse_args()
     mirror = options.mirror
     dist = options.distribution
@@ -100,12 +104,29 @@ def main():
                 path = para['Filename']
                 base = posixpath.basename(path)
                 queue[base] = path
+    if options.cache is not None:
+        conn = sqlite3.connect(options.cache)
+        cursor = conn.cursor()
+        cursor.execute('CREATE TABLE IF NOT EXISTS "results" ("name" PRIMARY KEY, "size.before", "size.after")')
+    else:
+        conn = cursor = None
     for base, path in queue.items():
+        if cursor is not None:
+            cursor.execute('SELECT "size.before", "size.after" FROM "results" WHERE "name" = ?', [base])
+            row = cursor.fetchone()
+            if row is not None:
+                print(f'{base}\t{row[0]}\t{row[1]}')
+                continue
         with Fetcher(urlbase=f'{mirror}/') as fetcher:
             fetcher.add(path, base)
             [path] = fetcher.run()
             (size_before, size_after) = recompress_inplace(path)
             print(f'{base}\t{size_before}\t{size_after}')
+        if cursor is not None:
+            cursor.execute('INSERT INTO "results" VALUES (?, ?, ?)', [base, size_before, size_after])
+            conn.commit()
+    if conn is not None:
+        conn.close()
 
 if __name__ == '__main__':
     main()
