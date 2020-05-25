@@ -194,12 +194,14 @@ def main():
             pass
         else:
             print(f'{base}\t{info}')
+            sys.stdout.flush()
             continue
         with Fetcher(urlbase=f'{mirror}/') as fetcher:
             fetcher.add(path, base)
             [path] = fetcher.run()
             info = recompress_inplace(path)
             print(f'{base}\t{info}')
+            sys.stdout.flush()
         cache[base] = info
     cache.close()
 
