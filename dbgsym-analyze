@@ -13,13 +13,14 @@ import argparse
 import dataclasses
 import os
 import posixpath
+import re
 import sqlite3
 import subprocess
 import tempfile
 import types
 import urllib.parse
 
-import apt
+import apt.debfile
 import apt_pkg
 
 class Fetcher():
@@ -66,6 +67,8 @@ recompress_cmd = os.path.join(here, 'dbgsym-recompress')
 class PkgInfo:
     size_before: int
     size_after: int
+    inst_size_before: int
+    inst_size_after: int
 
     def as_tuple(self):
         return dataclasses.astuple(self)
@@ -73,13 +76,26 @@ class PkgInfo:
     def __str__(self):
         return '\t'.join(map(str, self.as_tuple()))
 
+_inst_size_re = re.compile(r'^Installed-Size:[ \t]*([0-9]+)$', re.MULTILINE)
+def get_inst_size(path):
+    deb = apt.debfile.DebPackage(path)
+    ctrl = deb.control_content('control')
+    match = _inst_size_re.search(ctrl)
+    if match is None:
+        raise RuntimeError(f'{path}: missing Installed-Size')
+    return int(match.group(1)) * 1024
+
 def recompress_inplace(path):
     size_before = os.path.getsize(path)
+    inst_size_before = get_inst_size(path)
     subprocess.check_call(['fakeroot', recompress_cmd, path, path])
     size_after = os.path.getsize(path)
+    inst_size_after = get_inst_size(path)
     return PkgInfo(
         size_before,
         size_after,
+        inst_size_before,
+        inst_size_after,
     )
 
 class DummyCache(object):
@@ -98,7 +114,16 @@ class SQLiteCache(object):
     def __init__(self, path):
         self.conn = sqlite3.connect(path)
         with self.conn as conn:
-            conn.execute('CREATE TABLE IF NOT EXISTS "results" ("name" PRIMARY KEY, "size.before", "size.after")')
+            conn.execute(
+                '''CREATE TABLE IF NOT EXISTS "results" (
+                    "name" PRIMARY KEY,
+                    "size.before",
+                    "size.after",
+                    "inst_size.before",
+                    "inst_size.after"
+                )
+                '''
+            )
 
     def __getitem__(self, name):
         cursor = self.conn.cursor()
@@ -110,7 +135,7 @@ class SQLiteCache(object):
 
     def __setitem__(self, name, value):
         with self.conn as conn:
-            conn.execute('INSERT INTO "results" VALUES (?, ?, ?)',
+            conn.execute('INSERT INTO "results" VALUES (?, ?, ?, ?, ?)',
                 [name, *value.as_tuple()]
             )
 
