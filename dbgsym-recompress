@@ -25,6 +25,14 @@ if [ -d "$dbgdir" ]
 then
     find "$dbgdir" -type f -exec objcopy --decompress-debug-sections '{}' ';'
 fi
+# This is not quite how dpkg-gencontrol computes Installed-Size, but hey.
+tab='	'
+metasize=$(du --apparent-size -k -s "$tmpdir/DEBIAN")
+metasize=${metasize%${tab}**}
+allsize=$(du --apparent-size -k -s "$tmpdir")
+allsize=${allsize%${tab}**}
+instsize=$((allsize-metasize))
+sed -i -e "s/^[iI][nN][sS][tT][aA][lL][lL][eE][dD]-[sS][iI][zZ][eE]:.*\$/Installed-Size: $instsize/" "$tmpdir/DEBIAN/control"
 dpkg-deb --build "$tmpdir" "$out" >&2
 rm -rf "$tmpdir"
 
