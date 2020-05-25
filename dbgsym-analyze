@@ -4,20 +4,23 @@
 # Copyright © 2012-2020 Jakub Wilk <jwilk@jwilk.net>
 # SPDX-License-Identifier: MIT
 
+import sys
+
+if sys.version_info < (3, 7):
+    raise RuntimeError(f'Python >= 3.7 is required')
+
 import argparse
+import dataclasses
 import os
 import posixpath
 import sqlite3
 import subprocess
-import sys
 import tempfile
 import types
 import urllib.parse
 
 import apt
 import apt_pkg
-
-f''  # Python >= 3.6 is required
 
 class Fetcher():
 
@@ -59,11 +62,25 @@ class Fetcher():
 here = os.path.dirname(__file__)
 recompress_cmd = os.path.join(here, 'dbgsym-recompress')
 
+@dataclasses.dataclass(frozen=True)
+class PkgInfo:
+    size_before: int
+    size_after: int
+
+    def as_tuple(self):
+        return dataclasses.astuple(self)
+
+    def __str__(self):
+        return '\t'.join(map(str, self.as_tuple()))
+
 def recompress_inplace(path):
     size_before = os.path.getsize(path)
     subprocess.check_call(['fakeroot', recompress_cmd, path, path])
     size_after = os.path.getsize(path)
-    return (size_before, size_after)
+    return PkgInfo(
+        size_before,
+        size_after,
+    )
 
 class DummyCache(object):
 
@@ -85,15 +102,17 @@ class SQLiteCache(object):
 
     def __getitem__(self, name):
         cursor = self.conn.cursor()
-        cursor.execute('SELECT "size.before", "size.after" FROM "results" WHERE "name" = ?', [name])
+        cursor.execute('SELECT * FROM "results" WHERE "name" = ?', [name])
         row = cursor.fetchone()
         if row is None:
             raise KeyError(name)
-        return row
+        return PkgInfo(*row[1:])
 
     def __setitem__(self, name, value):
         with self.conn as conn:
-            conn.execute('INSERT INTO "results" VALUES (?, ?, ?)', [name, *value])
+            conn.execute('INSERT INTO "results" VALUES (?, ?, ?)',
+                [name, *value.as_tuple()]
+            )
 
     def close(self):
         self.conn.close()
@@ -145,18 +164,18 @@ def main():
         cache = SQLiteCache(options.cache)
     for base, path in queue.items():
         try:
-            [size_before, size_after] = cache[base]
+            info = cache[base]
         except KeyError:
             pass
         else:
-            print(f'{base}\t{size_before}\t{size_after}')
+            print(f'{base}\t{info}')
             continue
         with Fetcher(urlbase=f'{mirror}/') as fetcher:
             fetcher.add(path, base)
             [path] = fetcher.run()
-            (size_before, size_after) = recompress_inplace(path)
-            print(f'{base}\t{size_before}\t{size_after}')
-        cache[base] = (size_before, size_after)
+            info = recompress_inplace(path)
+            print(f'{base}\t{info}')
+        cache[base] = info
     cache.close()
 
 if __name__ == '__main__':
