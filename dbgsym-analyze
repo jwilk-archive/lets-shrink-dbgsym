@@ -11,9 +11,11 @@ if sys.version_info < (3, 7):
 
 import argparse
 import dataclasses
+import errno
 import os
 import posixpath
 import re
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -22,6 +24,11 @@ import urllib.parse
 
 import apt.debfile
 import apt_pkg
+
+def ensure_cmds_exist(*cmds):
+    for cmd in cmds:
+        if shutil.which(cmd) is None:
+            raise OSError(errno.ENOENT, 'command not found', cmd)
 
 class Fetcher():
 
@@ -167,6 +174,7 @@ def main():
         help='cache results in this file'
     )
     options = ap.parse_args()
+    ensure_cmds_exist('fakeroot', 'dpkg', 'objcopy')
     mirror = options.mirror
     dist = options.distribution
     areas = options.areas.split(',')
