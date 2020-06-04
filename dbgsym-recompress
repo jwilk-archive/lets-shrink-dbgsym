@@ -23,7 +23,8 @@ true > "$out"
 dbgdir="$tmpdir/usr/lib/debug"
 if [ -d "$dbgdir" ]
 then
-    find "$dbgdir" -type f -exec objcopy --decompress-debug-sections '{}' ';'
+    find "$dbgdir" -type f -print0 \
+    | xargs -0 -n1 sh -c 'objcopy --decompress-debug-sections "$@" || exit 255' -
 fi
 # This is not quite how dpkg-gencontrol computes Installed-Size, but hey.
 tab='	'
