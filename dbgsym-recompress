@@ -18,9 +18,11 @@ fi
 in="$1"
 out="$2"
 tmpdir=$(mktemp -d -t lets-shrink-dbgsym.XXXXXX)
-dpkg-deb -R "$in" "$tmpdir" >&2
+debdir="$tmpdir/deb"
+mkdir "$debdir"
+dpkg-deb -R "$in" "$debdir" >&2
 true > "$out"
-dbgdir="$tmpdir/usr/lib/debug"
+dbgdir="$debdir/usr/lib/debug"
 if [ -d "$dbgdir" ]
 then
     find "$dbgdir" -type f -print0 \
@@ -28,13 +30,13 @@ then
 fi
 # This is not quite how dpkg-gencontrol computes Installed-Size, but hey.
 tab='	'
-metasize=$(du --apparent-size -k -s "$tmpdir/DEBIAN")
+metasize=$(du --apparent-size -k -s "$debdir/DEBIAN")
 metasize=${metasize%${tab}**}
-allsize=$(du --apparent-size -k -s "$tmpdir")
+allsize=$(du --apparent-size -k -s "$debdir")
 allsize=${allsize%${tab}**}
 instsize=$((allsize-metasize))
-sed -i -e "s/^[iI][nN][sS][tT][aA][lL][lL][eE][dD]-[sS][iI][zZ][eE]:.*\$/Installed-Size: $instsize/" "$tmpdir/DEBIAN/control"
-dpkg-deb --build "$tmpdir" "$out" >&2
+sed -i -e "s/^[iI][nN][sS][tT][aA][lL][lL][eE][dD]-[sS][iI][zZ][eE]:.*\$/Installed-Size: $instsize/" "$debdir/DEBIAN/control"
+dpkg-deb --build "$debdir" "$out" >&2
 rm -rf "$tmpdir"
 
 # vim:ts=4 sts=4 sw=4 et
